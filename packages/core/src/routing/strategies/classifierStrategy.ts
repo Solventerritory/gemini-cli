@@ -6,16 +6,13 @@
 
 import { z } from 'zod';
 import type { BaseLlmClient } from '../../core/baseLlmClient.js';
-import { promptIdContext } from '../../utils/promptIdContext.js';
+import { getPromptIdWithFallback } from '../../utils/promptIdContext.js';
 import type {
   RoutingContext,
   RoutingDecision,
   RoutingStrategy,
 } from '../routingStrategy.js';
-import {
-  DEFAULT_GEMINI_FLASH_MODEL,
-  DEFAULT_GEMINI_MODEL,
-} from '../../config/models.js';
+import { resolveClassifierModel, isGemini3Model } from '../../config/models.js';
 import { createUserContent, Type } from '@google/genai';
 import type { Config } from '../../config/config.js';
 import {
@@ -23,6 +20,8 @@ import {
   isFunctionResponse,
 } from '../../utils/messageInspectors.js';
 import { debugLogger } from '../../utils/debugLogger.js';
+import { LlmRole } from '../../telemetry/types.js';
+import { AuthType } from '../../core/contentGenerator.js';
 
 // The number of recent history turns to provide to the router for context.
 const HISTORY_TURNS_FOR_CONTEXT = 4;
@@ -131,20 +130,20 @@ export class ClassifierStrategy implements RoutingStrategy {
 
   async route(
     context: RoutingContext,
-    _config: Config,
+    config: Config,
     baseLlmClient: BaseLlmClient,
   ): Promise<RoutingDecision | null> {
     const startTime = Date.now();
     try {
-      let promptId = promptIdContext.getStore();
-      if (!promptId) {
-        promptId = `classifier-router-fallback-${Date.now()}-${Math.random()
-          .toString(16)
-          .slice(2)}`;
-        debugLogger.warn(
-          `Could not find promptId in context. This is unexpected. Using a fallback ID: ${promptId}`,
-        );
+      const model = context.requestedModel ?? config.getModel();
+      if (
+        (await config.getNumericalRoutingEnabled()) &&
+        isGemini3Model(model)
+      ) {
+        return null;
       }
+
+      const promptId = getPromptIdWithFallback('classifier-router');
 
       const historySlice = context.history.slice(-HISTORY_SEARCH_WINDOW);
 
@@ -164,32 +163,32 @@ export class ClassifierStrategy implements RoutingStrategy {
         systemInstruction: CLASSIFIER_SYSTEM_PROMPT,
         abortSignal: context.signal,
         promptId,
+        role: LlmRole.UTILITY_ROUTER,
       });
 
       const routerResponse = ClassifierResponseSchema.parse(jsonResponse);
 
       const reasoning = routerResponse.reasoning;
       const latencyMs = Date.now() - startTime;
+      const useGemini3_1 = (await config.getGemini31Launched?.()) ?? false;
+      const useCustomToolModel =
+        useGemini3_1 &&
+        config.getContentGeneratorConfig().authType === AuthType.USE_GEMINI;
+      const selectedModel = resolveClassifierModel(
+        model,
+        routerResponse.model_choice,
+        useGemini3_1,
+        useCustomToolModel,
+      );
 
-      if (routerResponse.model_choice === FLASH_MODEL) {
-        return {
-          model: DEFAULT_GEMINI_FLASH_MODEL,
-          metadata: {
-            source: 'Classifier',
-            latencyMs,
-            reasoning,
-          },
-        };
-      } else {
-        return {
-          model: DEFAULT_GEMINI_MODEL,
-          metadata: {
-            source: 'Classifier',
-            reasoning,
-            latencyMs,
-          },
-        };
-      }
+      return {
+        model: selectedModel,
+        metadata: {
+          source: 'Classifier',
+          latencyMs,
+          reasoning,
+        },
+      };
     } catch (error) {
       // If the classifier fails for any reason (API error, parsing error, etc.),
       // we log it and return null to allow the composite strategy to proceed.

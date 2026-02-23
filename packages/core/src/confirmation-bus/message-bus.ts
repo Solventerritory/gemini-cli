@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { PolicyEngine } from '../policy/policy-engine.js';
 import { PolicyDecision } from '../policy/types.js';
 import { MessageBusType, type Message } from './types.js';
 import { safeJsonStringify } from '../utils/safeJsonStringify.js';
+import { debugLogger } from '../utils/debugLogger.js';
 
 export class MessageBus extends EventEmitter {
   constructor(
@@ -38,9 +40,9 @@ export class MessageBus extends EventEmitter {
     this.emit(message.type, message);
   }
 
-  publish(message: Message): void {
+  async publish(message: Message): Promise<void> {
     if (this.debug) {
-      console.debug(`[MESSAGE_BUS] publish: ${safeJsonStringify(message)}`);
+      debugLogger.debug(`[MESSAGE_BUS] publish: ${safeJsonStringify(message)}`);
     }
     try {
       if (!this.isValidMessage(message)) {
@@ -50,7 +52,7 @@ export class MessageBus extends EventEmitter {
       }
 
       if (message.type === MessageBusType.TOOL_CONFIRMATION_REQUEST) {
-        const decision = this.policyEngine.check(
+        const { decision } = await this.policyEngine.check(
           message.toolCall,
           message.serverName,
         );
@@ -77,8 +79,21 @@ export class MessageBus extends EventEmitter {
             });
             break;
           case PolicyDecision.ASK_USER:
-            // Pass through to UI for user confirmation
-            this.emitMessage(message);
+            // Pass through to UI for user confirmation if any listeners exist.
+            // If no listeners are registered (e.g., headless/ACP flows),
+            // immediately request user confirmation to avoid long timeouts.
+            if (
+              this.listenerCount(MessageBusType.TOOL_CONFIRMATION_REQUEST) > 0
+            ) {
+              this.emitMessage(message);
+            } else {
+              this.emitMessage({
+                type: MessageBusType.TOOL_CONFIRMATION_RESPONSE,
+                correlationId: message.correlationId,
+                confirmed: false,
+                requiresUserConfirmation: true,
+              });
+            }
             break;
           default:
             throw new Error(`Unknown policy decision: ${decision}`);
@@ -104,5 +119,48 @@ export class MessageBus extends EventEmitter {
     listener: (message: T) => void,
   ): void {
     this.off(type, listener);
+  }
+
+  /**
+   * Request-response pattern: Publish a message and wait for a correlated response
+   * This enables synchronous-style communication over the async MessageBus
+   * The correlation ID is generated internally and added to the request
+   */
+  async request<TRequest extends Message, TResponse extends Message>(
+    request: Omit<TRequest, 'correlationId'>,
+    responseType: TResponse['type'],
+    timeoutMs: number = 60000,
+  ): Promise<TResponse> {
+    const correlationId = randomUUID();
+
+    return new Promise<TResponse>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        cleanup();
+        reject(new Error(`Request timed out waiting for ${responseType}`));
+      }, timeoutMs);
+
+      const cleanup = () => {
+        clearTimeout(timeoutId);
+        this.unsubscribe(responseType, responseHandler);
+      };
+
+      const responseHandler = (response: TResponse) => {
+        // Check if this response matches our request
+        if (
+          'correlationId' in response &&
+          response.correlationId === correlationId
+        ) {
+          cleanup();
+          resolve(response);
+        }
+      };
+
+      // Subscribe to responses
+      this.subscribe<TResponse>(responseType, responseHandler);
+
+      // Publish the request with correlation ID
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises, @typescript-eslint/no-unsafe-type-assertion
+      this.publish({ ...request, correlationId } as TRequest);
+    });
   }
 }

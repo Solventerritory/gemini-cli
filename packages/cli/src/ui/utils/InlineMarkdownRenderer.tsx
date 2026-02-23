@@ -7,7 +7,8 @@
 import React from 'react';
 import { Text } from 'ink';
 import { theme } from '../semantic-colors.js';
-import stringWidth from 'string-width';
+import { debugLogger } from '@google/gemini-cli-core';
+import { stripUnsafeCharacters } from './textUtils.js';
 
 // Constants for Markdown parsing
 const BOLD_MARKER_LENGTH = 2; // For "**"
@@ -23,9 +24,10 @@ interface RenderInlineProps {
 }
 
 const RenderInlineInternal: React.FC<RenderInlineProps> = ({
-  text,
+  text: rawText,
   defaultColor,
 }) => {
+  const text = stripUnsafeCharacters(rawText);
   const baseColor = defaultColor ?? theme.text.primary;
   // Early return for plain text without markdown or URLs
   if (!/[*_~`<[https?:]/.test(text)) {
@@ -144,7 +146,7 @@ const RenderInlineInternal: React.FC<RenderInlineProps> = ({
         );
       }
     } catch (e) {
-      console.error('Error parsing inline markdown part:', fullMatch, e);
+      debugLogger.warn('Error parsing inline markdown part:', fullMatch, e);
       renderedNode = null;
     }
 
@@ -170,19 +172,3 @@ const RenderInlineInternal: React.FC<RenderInlineProps> = ({
 };
 
 export const RenderInline = React.memo(RenderInlineInternal);
-
-/**
- * Utility function to get the plain text length of a string with markdown formatting
- * This is useful for calculating column widths in tables
- */
-export const getPlainTextLength = (text: string): number => {
-  const cleanText = text
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/\*(.*?)\*/g, '$1')
-    .replace(/_(.*?)_/g, '$1')
-    .replace(/~~(.*?)~~/g, '$1')
-    .replace(/`(.*?)`/g, '$1')
-    .replace(/<u>(.*?)<\/u>/g, '$1')
-    .replace(/.*\[(.*?)\]\(.*\)/g, '$1');
-  return stringWidth(cleanText);
-};

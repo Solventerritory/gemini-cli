@@ -4,11 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { type PolicyRule, PolicyDecision, type ApprovalMode } from './types.js';
+import {
+  type PolicyRule,
+  PolicyDecision,
+  ApprovalMode,
+  type SafetyCheckerConfig,
+  type SafetyCheckerRule,
+  InProcessCheckerType,
+} from './types.js';
+import { buildArgsPatterns, isSafeRegExp } from './utils.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import toml from '@iarna/toml';
 import { z, type ZodError } from 'zod';
+import { isNodeError } from '../utils/errors.js';
 
 /**
  * Schema for a single policy rule in the TOML file (before transformation).
@@ -36,14 +45,44 @@ const PolicyRuleSchema = z.object({
       message:
         'priority must be <= 999 to prevent tier overflow. Priorities >= 1000 would jump to the next tier.',
     }),
-  modes: z.array(z.string()).optional(),
+  modes: z.array(z.nativeEnum(ApprovalMode)).optional(),
+  allow_redirection: z.boolean().optional(),
+  deny_message: z.string().optional(),
+});
+
+/**
+ * Schema for a single safety checker rule in the TOML file.
+ */
+const SafetyCheckerRuleSchema = z.object({
+  toolName: z.union([z.string(), z.array(z.string())]).optional(),
+  mcpName: z.string().optional(),
+  argsPattern: z.string().optional(),
+  commandPrefix: z.union([z.string(), z.array(z.string())]).optional(),
+  commandRegex: z.string().optional(),
+  priority: z.number().int().default(0),
+  modes: z.array(z.nativeEnum(ApprovalMode)).optional(),
+  checker: z.discriminatedUnion('type', [
+    z.object({
+      type: z.literal('in-process'),
+      name: z.nativeEnum(InProcessCheckerType),
+      required_context: z.array(z.string()).optional(),
+      config: z.record(z.unknown()).optional(),
+    }),
+    z.object({
+      type: z.literal('external'),
+      name: z.string(),
+      required_context: z.array(z.string()).optional(),
+      config: z.record(z.unknown()).optional(),
+    }),
+  ]),
 });
 
 /**
  * Schema for the entire policy TOML file.
  */
 const PolicyFileSchema = z.object({
-  rule: z.array(PolicyRuleSchema),
+  rule: z.array(PolicyRuleSchema).optional(),
+  safety_checker: z.array(SafetyCheckerRuleSchema).optional(),
 });
 
 /**
@@ -67,7 +106,7 @@ export type PolicyFileErrorType =
 export interface PolicyFileError {
   filePath: string;
   fileName: string;
-  tier: 'default' | 'user' | 'admin';
+  tier: 'default' | 'user' | 'workspace' | 'admin';
   ruleIndex?: number;
   errorType: PolicyFileErrorType;
   message: string;
@@ -80,27 +119,63 @@ export interface PolicyFileError {
  */
 export interface PolicyLoadResult {
   rules: PolicyRule[];
+  checkers: SafetyCheckerRule[];
   errors: PolicyFileError[];
 }
 
+export interface PolicyFile {
+  path: string;
+  content: string;
+}
+
 /**
- * Escapes special regex characters in a string for use in a regex pattern.
- * This is used for commandPrefix to ensure literal string matching.
+ * Reads policy files from a directory or a single file.
  *
- * @param str The string to escape
- * @returns The escaped string safe for use in a regex
+ * @param policyPath Path to a directory or a .toml file.
+ * @returns Array of PolicyFile objects.
  */
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export async function readPolicyFiles(
+  policyPath: string,
+): Promise<PolicyFile[]> {
+  let filesToLoad: string[] = [];
+  let baseDir = '';
+
+  try {
+    const stats = await fs.stat(policyPath);
+    if (stats.isDirectory()) {
+      baseDir = policyPath;
+      const dirEntries = await fs.readdir(policyPath, { withFileTypes: true });
+      filesToLoad = dirEntries
+        .filter((entry) => entry.isFile() && entry.name.endsWith('.toml'))
+        .map((entry) => entry.name);
+    } else if (stats.isFile() && policyPath.endsWith('.toml')) {
+      baseDir = path.dirname(policyPath);
+      filesToLoad = [path.basename(policyPath)];
+    }
+  } catch (e) {
+    if (isNodeError(e) && e.code === 'ENOENT') {
+      return [];
+    }
+    throw e;
+  }
+
+  const results: PolicyFile[] = [];
+  for (const file of filesToLoad) {
+    const filePath = path.join(baseDir, file);
+    const content = await fs.readFile(filePath, 'utf-8');
+    results.push({ path: filePath, content });
+  }
+  return results;
 }
 
 /**
  * Converts a tier number to a human-readable tier name.
  */
-function getTierName(tier: number): 'default' | 'user' | 'admin' {
+function getTierName(tier: number): 'default' | 'user' | 'workspace' | 'admin' {
   if (tier === 1) return 'default';
-  if (tier === 2) return 'user';
-  if (tier === 3) return 'admin';
+  if (tier === 2) return 'workspace';
+  if (tier === 3) return 'user';
+  if (tier === 4) return 'admin';
   return 'default';
 }
 
@@ -174,68 +249,56 @@ function transformPriority(priority: number, tier: number): number {
 }
 
 /**
- * Loads and parses policies from TOML files in the specified directories.
+ * Loads and parses policies from TOML files in the specified paths (directories or individual files).
  *
  * This function:
- * 1. Scans directories for .toml files
+ * 1. Scans paths for .toml files (if directory) or processes individual files
  * 2. Parses and validates each file
  * 3. Transforms rules (commandPrefix, arrays, mcpName, priorities)
- * 4. Filters rules by approval mode
- * 5. Collects detailed error information for any failures
+ * 4. Collects detailed error information for any failures
  *
- * @param approvalMode The current approval mode (for filtering rules by mode)
- * @param policyDirs Array of directory paths to scan for policy files
- * @param getPolicyTier Function to determine tier (1-3) for a directory
+ * @param policyPaths Array of paths (directories or files) to scan for policy files
+ * @param getPolicyTier Function to determine tier (1-4) for a path
  * @returns Object containing successfully parsed rules and any errors encountered
  */
 export async function loadPoliciesFromToml(
-  approvalMode: ApprovalMode,
-  policyDirs: string[],
-  getPolicyTier: (dir: string) => number,
+  policyPaths: string[],
+  getPolicyTier: (path: string) => number,
 ): Promise<PolicyLoadResult> {
   const rules: PolicyRule[] = [];
+  const checkers: SafetyCheckerRule[] = [];
   const errors: PolicyFileError[] = [];
 
-  for (const dir of policyDirs) {
-    const tier = getPolicyTier(dir);
+  for (const p of policyPaths) {
+    const tier = getPolicyTier(p);
     const tierName = getTierName(tier);
 
-    // Scan directory for all .toml files
-    let filesToLoad: string[];
+    let policyFiles: PolicyFile[] = [];
+
     try {
-      const dirEntries = await fs.readdir(dir, { withFileTypes: true });
-      filesToLoad = dirEntries
-        .filter((entry) => entry.isFile() && entry.name.endsWith('.toml'))
-        .map((entry) => entry.name);
+      policyFiles = await readPolicyFiles(p);
     } catch (e) {
-      const error = e as NodeJS.ErrnoException;
-      if (error.code === 'ENOENT') {
-        // Directory doesn't exist, skip it (not an error)
-        continue;
-      }
       errors.push({
-        filePath: dir,
-        fileName: path.basename(dir),
+        filePath: p,
+        fileName: path.basename(p),
         tier: tierName,
         errorType: 'file_read',
-        message: `Failed to read policy directory`,
-        details: error.message,
+        message: `Failed to read policy path`,
+        details: isNodeError(e) ? e.message : String(e),
       });
       continue;
     }
 
-    for (const file of filesToLoad) {
-      const filePath = path.join(dir, file);
+    for (const { path: filePath, content: fileContent } of policyFiles) {
+      const file = path.basename(filePath);
 
       try {
-        // Read file
-        const fileContent = await fs.readFile(filePath, 'utf-8');
-
         // Parse TOML
         let parsed: unknown;
         try {
           parsed = toml.parse(fileContent);
         } catch (e) {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
           const error = e as Error;
           errors.push({
             filePath,
@@ -267,8 +330,10 @@ export async function loadPoliciesFromToml(
         }
 
         // Validate shell command convenience syntax
-        for (let i = 0; i < validationResult.data.rule.length; i++) {
-          const rule = validationResult.data.rule[i];
+        const tomlRules = validationResult.data.rule ?? [];
+
+        for (let i = 0; i < tomlRules.length; i++) {
+          const rule = tomlRules[i];
           const validationError = validateShellCommandSyntax(rule, i);
           if (validationError) {
             errors.push({
@@ -285,35 +350,13 @@ export async function loadPoliciesFromToml(
         }
 
         // Transform rules
-        const parsedRules: PolicyRule[] = validationResult.data.rule
-          .filter((rule) => {
-            // Filter by mode
-            if (!rule.modes || rule.modes.length === 0) {
-              return true;
-            }
-            return rule.modes.includes(approvalMode);
-          })
+        const parsedRules: PolicyRule[] = (validationResult.data.rule ?? [])
           .flatMap((rule) => {
-            // Transform commandPrefix/commandRegex to argsPattern
-            let effectiveArgsPattern = rule.argsPattern;
-            const commandPrefixes: string[] = [];
-
-            if (rule.commandPrefix) {
-              const prefixes = Array.isArray(rule.commandPrefix)
-                ? rule.commandPrefix
-                : [rule.commandPrefix];
-              commandPrefixes.push(...prefixes);
-            } else if (rule.commandRegex) {
-              effectiveArgsPattern = `"command":"${rule.commandRegex}`;
-            }
-
-            // Expand command prefixes to multiple patterns
-            const argsPatterns: Array<string | undefined> =
-              commandPrefixes.length > 0
-                ? commandPrefixes.map(
-                    (prefix) => `"command":"${escapeRegex(prefix)}`,
-                  )
-                : [effectiveArgsPattern];
+            const argsPatterns = buildArgsPatterns(
+              rule.argsPattern,
+              rule.commandPrefix,
+              rule.commandRegex,
+            );
 
             // For each argsPattern, expand toolName arrays
             return argsPatterns.flatMap((argsPattern) => {
@@ -339,13 +382,18 @@ export async function loadPoliciesFromToml(
                   toolName: effectiveToolName,
                   decision: rule.decision,
                   priority: transformPriority(rule.priority, tier),
+                  modes: rule.modes,
+                  allowRedirection: rule.allow_redirection,
+                  source: `${tierName.charAt(0).toUpperCase() + tierName.slice(1)}: ${file}`,
+                  denyMessage: rule.deny_message,
                 };
 
                 // Compile regex pattern
                 if (argsPattern) {
                   try {
-                    policyRule.argsPattern = new RegExp(argsPattern);
+                    new RegExp(argsPattern);
                   } catch (e) {
+                    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
                     const error = e as Error;
                     errors.push({
                       filePath,
@@ -357,9 +405,24 @@ export async function loadPoliciesFromToml(
                       suggestion:
                         'Check regex syntax for errors like unmatched brackets or invalid escape sequences',
                     });
-                    // Skip this rule if regex compilation fails
                     return null;
                   }
+
+                  if (!isSafeRegExp(argsPattern)) {
+                    errors.push({
+                      filePath,
+                      fileName: file,
+                      tier: tierName,
+                      errorType: 'regex_compilation',
+                      message: 'Unsafe regex pattern (potential ReDoS)',
+                      details: `Pattern: ${argsPattern}`,
+                      suggestion:
+                        'Avoid nested quantifiers or extremely long patterns',
+                    });
+                    return null;
+                  }
+
+                  policyRule.argsPattern = new RegExp(argsPattern);
                 }
 
                 return policyRule;
@@ -369,22 +432,99 @@ export async function loadPoliciesFromToml(
           .filter((rule): rule is PolicyRule => rule !== null);
 
         rules.push(...parsedRules);
+
+        // Transform checkers
+        const parsedCheckers: SafetyCheckerRule[] = (
+          validationResult.data.safety_checker ?? []
+        )
+          .flatMap((checker) => {
+            const argsPatterns = buildArgsPatterns(
+              checker.argsPattern,
+              checker.commandPrefix,
+              checker.commandRegex,
+            );
+
+            return argsPatterns.flatMap((argsPattern) => {
+              const toolNames: Array<string | undefined> = checker.toolName
+                ? Array.isArray(checker.toolName)
+                  ? checker.toolName
+                  : [checker.toolName]
+                : [undefined];
+
+              return toolNames.map((toolName) => {
+                let effectiveToolName: string | undefined;
+                if (checker.mcpName && toolName) {
+                  effectiveToolName = `${checker.mcpName}__${toolName}`;
+                } else if (checker.mcpName) {
+                  effectiveToolName = `${checker.mcpName}__*`;
+                } else {
+                  effectiveToolName = toolName;
+                }
+
+                const safetyCheckerRule: SafetyCheckerRule = {
+                  toolName: effectiveToolName,
+                  priority: transformPriority(checker.priority, tier),
+                  // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+                  checker: checker.checker as SafetyCheckerConfig,
+                  modes: checker.modes,
+                  source: `${tierName.charAt(0).toUpperCase() + tierName.slice(1)}: ${file}`,
+                };
+
+                if (argsPattern) {
+                  try {
+                    new RegExp(argsPattern);
+                  } catch (e) {
+                    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+                    const error = e as Error;
+                    errors.push({
+                      filePath,
+                      fileName: file,
+                      tier: tierName,
+                      errorType: 'regex_compilation',
+                      message: 'Invalid regex pattern in safety checker',
+                      details: `Pattern: ${argsPattern}\nError: ${error.message}`,
+                    });
+                    return null;
+                  }
+
+                  if (!isSafeRegExp(argsPattern)) {
+                    errors.push({
+                      filePath,
+                      fileName: file,
+                      tier: tierName,
+                      errorType: 'regex_compilation',
+                      message:
+                        'Unsafe regex pattern in safety checker (potential ReDoS)',
+                      details: `Pattern: ${argsPattern}`,
+                    });
+                    return null;
+                  }
+
+                  safetyCheckerRule.argsPattern = new RegExp(argsPattern);
+                }
+
+                return safetyCheckerRule;
+              });
+            });
+          })
+          .filter((checker): checker is SafetyCheckerRule => checker !== null);
+
+        checkers.push(...parsedCheckers);
       } catch (e) {
-        const error = e as NodeJS.ErrnoException;
         // Catch-all for unexpected errors
-        if (error.code !== 'ENOENT') {
+        if (!isNodeError(e) || e.code !== 'ENOENT') {
           errors.push({
             filePath,
             fileName: file,
             tier: tierName,
             errorType: 'file_read',
             message: 'Failed to read policy file',
-            details: error.message,
+            details: isNodeError(e) ? e.message : String(e),
           });
         }
       }
     }
   }
 
-  return { rules, errors };
+  return { rules, checkers, errors };
 }

@@ -1,4 +1,4 @@
-# How to Contribute
+# How to contribute
 
 We would love to accept your patches and contributions to this project. This
 document includes:
@@ -41,7 +41,14 @@ This project follows
 
 The process for contributing code is as follows:
 
-1.  **Find an issue** that you want to work on.
+1.  **Find an issue** that you want to work on. If an issue is tagged as
+    `🔒Maintainers only`, this means it is reserved for project maintainers. We
+    will not accept pull requests related to these issues. In the near future,
+    we will explicitly mark issues looking for contributions using the
+    `help-wanted` label. If you believe an issue is a good candidate for
+    community contribution, please leave a comment on the issue. A maintainer
+    will review it and apply the `help-wanted` label if appropriate. Only
+    maintainers should attempt to add the `help-wanted` label to an issue.
 2.  **Fork the repository** and create a new branch.
 3.  **Make your changes** in the `packages/` directory.
 4.  **Ensure all checks pass** by running `npm run preflight`.
@@ -70,10 +77,6 @@ augment their manual review process.
 
 ### Self assigning issues
 
-If you're looking for an issue to work on, check out our list of issues that are
-labeled
-["help wanted"](https://github.com/google-gemini/gemini-cli/issues?q=is%3Aissue+state%3Aopen+label%3A%22help+wanted%22).
-
 To assign an issue to yourself, simply add a comment with the text `/assign`.
 The comment must contain only that text and nothing else. This command will
 assign the issue to you, provided it is not already assigned.
@@ -96,8 +99,11 @@ any code is written.
 - **For features:** The PR should be linked to the feature request or proposal
   issue that has been approved by a maintainer.
 
-If an issue for your change doesn't exist, please **open one first** and wait
-for feedback before you start coding.
+If an issue for your change doesn't exist, we will automatically close your PR
+along with a comment reminding you to associate the PR with an issue. The ideal
+workflow starts with an issue that has been reviewed and approved by a
+maintainer. Please **open the issue first** and wait for feedback before you
+start coding.
 
 #### 2. Keep it small and focused
 
@@ -402,12 +408,13 @@ On macOS, `gemini` uses Seatbelt (`sandbox-exec`) under a `permissive-open`
 profile (see `packages/cli/src/utils/sandbox-macos-permissive-open.sb`) that
 restricts writes to the project folder but otherwise allows all other operations
 and outbound network traffic ("open") by default. You can switch to a
-`restrictive-closed` profile (see
-`packages/cli/src/utils/sandbox-macos-restrictive-closed.sb`) that declines all
-operations and outbound network traffic ("closed") by default by setting
-`SEATBELT_PROFILE=restrictive-closed` in your environment or `.env` file.
-Available built-in profiles are `{permissive,restrictive}-{open,closed,proxied}`
-(see below for proxied networking). You can also switch to a custom profile
+`strict-open` profile (see
+`packages/cli/src/utils/sandbox-macos-strict-open.sb`) that restricts both reads
+and writes to the working directory while allowing outbound network traffic by
+setting `SEATBELT_PROFILE=strict-open` in your environment or `.env` file.
+Available built-in profiles are `permissive-{open,proxied}`,
+`restrictive-{open,proxied}`, and `strict-{open,proxied}` (see below for proxied
+networking). You can also switch to a custom profile
 `SEATBELT_PROFILE=<profile>` if you also create a file
 `.gemini/sandbox-macos-<profile>.sb` under your project settings directory
 `.gemini`.
@@ -539,7 +546,7 @@ Before submitting your documentation pull request, please:
 
 If you have questions about contributing documentation:
 
-- Check our [FAQ](/docs/faq.md).
+- Check our [FAQ](/docs/resources/faq.md).
 - Review existing documentation for examples.
 - Open [an issue](https://github.com/google-gemini/gemini-cli/issues) to discuss
   your proposed changes.

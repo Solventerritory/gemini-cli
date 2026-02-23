@@ -20,6 +20,9 @@ inputs:
   github-token:
     description: 'The GitHub token for creating the release.'
     required: true
+  github-release-token:
+    description: 'The GitHub token used specifically for creating the GitHub release (to trigger other workflows).'
+    required: false
   dry-run:
     description: 'Whether to run in dry-run mode.'
     type: 'string'
@@ -254,7 +257,7 @@ runs:
       working-directory: '${{ inputs.working-directory }}'
       if: "${{ inputs.dry-run != 'true' && inputs.skip-github-release != 'true' && inputs.npm-tag != 'dev' && inputs.npm-registry-url != 'https://npm.pkg.github.com/' }}"
       env:
-        GITHUB_TOKEN: '${{ inputs.github-token }}'
+        GITHUB_TOKEN: '${{ inputs.github-release-token || inputs.github-token }}'
       shell: 'bash'
       run: |
         gh release create "${{ inputs.release-tag }}" \
@@ -262,7 +265,8 @@ runs:
           --target "${{ steps.release_branch.outputs.BRANCH_NAME }}" \
           --title "Release ${{ inputs.release-tag }}" \
           --notes-start-tag "${{ inputs.previous-tag }}" \
-          --generate-notes
+          --generate-notes \
+          ${{ inputs.npm-tag != 'latest' && '--prerelease' || '' }}
 
     - name: '🧹 Clean up release branch'
       working-directory: '${{ inputs.working-directory }}'

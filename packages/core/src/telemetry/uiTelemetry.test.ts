@@ -8,8 +8,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { UiTelemetryService } from './uiTelemetry.js';
 import { ToolCallDecision } from './tool-call-decision.js';
 import type { ApiErrorEvent, ApiResponseEvent } from './types.js';
-import { ToolCallEvent } from './types.js';
 import {
+  ToolCallEvent,
   EVENT_API_ERROR,
   EVENT_API_RESPONSE,
   EVENT_TOOL_CALL,
@@ -173,6 +173,7 @@ describe('UiTelemetryService', () => {
           totalLatencyMs: 500,
         },
         tokens: {
+          input: 5,
           prompt: 10,
           candidates: 20,
           total: 30,
@@ -180,6 +181,7 @@ describe('UiTelemetryService', () => {
           thoughts: 2,
           tool: 3,
         },
+        roles: {},
       });
       expect(service.getLastPromptTokenCount()).toBe(0);
     });
@@ -227,6 +229,7 @@ describe('UiTelemetryService', () => {
           totalLatencyMs: 1100,
         },
         tokens: {
+          input: 10,
           prompt: 25,
           candidates: 45,
           total: 70,
@@ -234,6 +237,7 @@ describe('UiTelemetryService', () => {
           thoughts: 6,
           tool: 9,
         },
+        roles: {},
       });
       expect(service.getLastPromptTokenCount()).toBe(0);
     });
@@ -301,6 +305,7 @@ describe('UiTelemetryService', () => {
           totalLatencyMs: 300,
         },
         tokens: {
+          input: 0,
           prompt: 0,
           candidates: 0,
           total: 0,
@@ -308,6 +313,7 @@ describe('UiTelemetryService', () => {
           thoughts: 0,
           tool: 0,
         },
+        roles: {},
       });
     });
 
@@ -345,12 +351,42 @@ describe('UiTelemetryService', () => {
           totalLatencyMs: 800,
         },
         tokens: {
+          input: 5,
           prompt: 10,
           candidates: 20,
           total: 30,
           cached: 5,
           thoughts: 2,
           tool: 3,
+        },
+        roles: {},
+      });
+    });
+
+    it('should update role metrics when processing an ApiErrorEvent with a role', () => {
+      const event = {
+        'event.name': EVENT_API_ERROR,
+        model: 'gemini-2.5-pro',
+        duration_ms: 300,
+        error: 'Something went wrong',
+        role: 'utility_tool',
+      } as unknown as ApiErrorEvent & { 'event.name': typeof EVENT_API_ERROR };
+
+      service.addEvent(event);
+
+      const metrics = service.getMetrics();
+      expect(metrics.models['gemini-2.5-pro'].roles['utility_tool']).toEqual({
+        totalRequests: 1,
+        totalErrors: 1,
+        totalLatencyMs: 300,
+        tokens: {
+          input: 0,
+          prompt: 0,
+          candidates: 0,
+          total: 0,
+          cached: 0,
+          thoughts: 0,
+          tool: 0,
         },
       });
     });

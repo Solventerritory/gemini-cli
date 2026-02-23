@@ -12,7 +12,7 @@ import prettierConfig from 'eslint-config-prettier';
 import importPlugin from 'eslint-plugin-import';
 import vitest from '@vitest/eslint-plugin';
 import globals from 'globals';
-import licenseHeader from 'eslint-plugin-license-header';
+import headers from 'eslint-plugin-headers';
 import path from 'node:path';
 import url from 'node:url';
 
@@ -23,19 +23,22 @@ const __dirname = path.dirname(__filename);
 
 // Determine the monorepo root (assuming eslint.config.js is at the root)
 const projectRoot = __dirname;
+const currentYear = new Date().getFullYear();
 
 export default tseslint.config(
   {
     // Global ignores
     ignores: [
       'node_modules/*',
-      '.integration-tests/**',
       'eslint.config.js',
       'packages/**/dist/**',
       'bundle/**',
       'package/bundle/**',
       '.integration-tests/**',
       'dist/**',
+      'evals/**',
+      'packages/test-utils/**',
+      '.gemini/skills/**',
     ],
   },
   eslint.configs.recommended,
@@ -53,7 +56,7 @@ export default tseslint.config(
   },
   {
     // Import specific config
-    files: ['packages/cli/src/**/*.{ts,tsx}'], // Target only TS/TSX in the cli package
+    files: ['packages/*/src/**/*.{ts,tsx}'], // Target all TS/TSX in the packages
     plugins: {
       import: importPlugin,
     },
@@ -81,6 +84,11 @@ export default tseslint.config(
       },
     },
     languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: projectRoot,
+      },
       globals: {
         ...globals.node,
         ...globals.es2021,
@@ -118,6 +126,8 @@ export default tseslint.config(
           caughtErrorsIgnorePattern: '^_',
         },
       ],
+      // Prevent async errors from bypassing catch handlers
+      '@typescript-eslint/return-await': ['error', 'in-try-catch'],
       'import/no-internal-modules': [
         'error',
         {
@@ -158,7 +168,53 @@ export default tseslint.config(
       'prefer-arrow-callback': 'error',
       'prefer-const': ['error', { destructuring: 'all' }],
       radix: 'error',
+      'no-console': 'error',
       'default-case': 'error',
+      '@typescript-eslint/await-thenable': ['error'],
+      '@typescript-eslint/no-floating-promises': ['error'],
+      '@typescript-eslint/no-unnecessary-type-assertion': ['error'],
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'node:os',
+              importNames: ['homedir', 'tmpdir'],
+              message:
+                'Please use the helpers from @google/gemini-cli-core instead of node:os homedir()/tmpdir() to ensure strict environment isolation.',
+            },
+            {
+              name: 'os',
+              importNames: ['homedir', 'tmpdir'],
+              message:
+                'Please use the helpers from @google/gemini-cli-core instead of os homedir()/tmpdir() to ensure strict environment isolation.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // Rules that only apply to product code
+    files: ['packages/*/src/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.ts', '**/*.test.tsx'],
+    rules: {
+      '@typescript-eslint/no-unsafe-type-assertion': 'error',
+      '@typescript-eslint/no-unsafe-assignment': 'error',
+      '@typescript-eslint/no-unsafe-return': 'error',
+    },
+  },
+  {
+    // Allow os.homedir() in tests and paths.ts where it is used to implement the helper
+    files: [
+      '**/*.test.ts',
+      '**/*.test.tsx',
+      'packages/core/src/utils/paths.ts',
+      'packages/test-utils/src/**/*.ts',
+      'scripts/**/*.js',
+    ],
+    rules: {
+      'no-restricted-imports': 'off',
     },
   },
   {
@@ -187,6 +243,18 @@ export default tseslint.config(
     },
   },
   {
+    files: ['packages/sdk/src/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          name: '@google/gemini-cli-sdk',
+          message: 'Please use relative imports within the @google/gemini-cli-sdk package.',
+        },
+      ],
+    },
+  },
+  {
     files: ['packages/*/src/**/*.test.{ts,tsx}'],
     plugins: {
       vitest,
@@ -198,26 +266,32 @@ export default tseslint.config(
     },
   },
   {
-    files: ['./**/*.{tsx,ts,js}'],
+    files: ['./**/*.{tsx,ts,js,cjs}'],
     plugins: {
-      'license-header': licenseHeader,
+      headers,
       import: importPlugin,
     },
     rules: {
-      'license-header/header': [
+      'headers/header-format': [
         'error',
-        [
-          '/**',
-          ' * @license',
-          ' * Copyright 2025 Google LLC',
-          ' * SPDX-License-Identifier: Apache-2.0',
-          ' */',
-        ],
+        {
+          source: 'string',
+          content: [
+            '@license',
+            'Copyright (year) Google LLC',
+            'SPDX-License-Identifier: Apache-2.0',
+          ].join('\n'),
+          patterns: {
+            year: {
+              pattern: `202[5-${currentYear.toString().slice(-1)}]`,
+              defaultValue: currentYear.toString(),
+            },
+          },
+        },
       ],
       'import/enforce-node-protocol-usage': ['error', 'always'],
     },
   },
-  // extra settings for scripts that we run directly with node
   {
     files: ['./scripts/**/*.js', 'esbuild.config.js'],
     languageOptions: {
@@ -228,6 +302,30 @@ export default tseslint.config(
       },
     },
     rules: {
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
+        },
+      ],
+    },
+  },
+  {
+    files: ['**/*.cjs'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: {
+        ...globals.node,
+      },
+    },
+    rules: {
+      'no-restricted-syntax': 'off',
+      'no-console': 'off',
+      'no-empty': 'off',
+      'no-redeclare': 'off',
+      '@typescript-eslint/no-require-imports': 'off',
       '@typescript-eslint/no-unused-vars': [
         'error',
         {
@@ -250,6 +348,16 @@ export default tseslint.config(
     rules: {
       'no-restricted-syntax': 'off',
       '@typescript-eslint/no-require-imports': 'off',
+    },
+  },
+  // Examples should have access to standard globals like fetch
+  {
+    files: ['packages/cli/src/commands/extensions/examples/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        fetch: 'readonly',
+      },
     },
   },
   // extra settings for scripts that we run directly with node

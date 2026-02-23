@@ -7,12 +7,28 @@
 import { StreamingState } from '../types.js';
 import { useTimer } from './useTimer.js';
 import { usePhraseCycler } from './usePhraseCycler.js';
-import { useState, useEffect, useRef } from 'react'; // Added useRef
+import { useState, useEffect, useRef } from 'react';
+import {
+  getDisplayString,
+  type RetryAttemptPayload,
+} from '@google/gemini-cli-core';
+import type { LoadingPhrasesMode } from '../../config/settings.js';
 
-export const useLoadingIndicator = (
-  streamingState: StreamingState,
-  customWittyPhrases?: string[],
-) => {
+export interface UseLoadingIndicatorProps {
+  streamingState: StreamingState;
+  shouldShowFocusHint: boolean;
+  retryStatus: RetryAttemptPayload | null;
+  loadingPhrasesMode?: LoadingPhrasesMode;
+  customWittyPhrases?: string[];
+}
+
+export const useLoadingIndicator = ({
+  streamingState,
+  shouldShowFocusHint,
+  retryStatus,
+  loadingPhrasesMode,
+  customWittyPhrases,
+}: UseLoadingIndicatorProps) => {
   const [timerResetKey, setTimerResetKey] = useState(0);
   const isTimerActive = streamingState === StreamingState.Responding;
 
@@ -23,6 +39,8 @@ export const useLoadingIndicator = (
   const currentLoadingPhrase = usePhraseCycler(
     isPhraseCyclingActive,
     isWaiting,
+    shouldShowFocusHint,
+    loadingPhrasesMode,
     customWittyPhrases,
   );
 
@@ -51,11 +69,15 @@ export const useLoadingIndicator = (
     prevStreamingStateRef.current = streamingState;
   }, [streamingState, elapsedTimeFromTimer]);
 
+  const retryPhrase = retryStatus
+    ? `Trying to reach ${getDisplayString(retryStatus.model)} (Attempt ${retryStatus.attempt + 1}/${retryStatus.maxAttempts})`
+    : null;
+
   return {
     elapsedTime:
       streamingState === StreamingState.WaitingForConfirmation
         ? retainedElapsedTime
         : elapsedTimeFromTimer,
-    currentLoadingPhrase,
+    currentLoadingPhrase: retryPhrase || currentLoadingPhrase,
   };
 };

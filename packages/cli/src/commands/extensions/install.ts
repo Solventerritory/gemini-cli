@@ -5,19 +5,19 @@
  */
 
 import type { CommandModule } from 'yargs';
-import {
-  debugLogger,
-  type ExtensionInstallMetadata,
-} from '@google/gemini-cli-core';
+import { debugLogger } from '@google/gemini-cli-core';
 import { getErrorMessage } from '../../utils/errors.js';
-import { stat } from 'node:fs/promises';
 import {
   INSTALL_WARNING_MESSAGE,
   requestConsentNonInteractive,
 } from '../../config/extensions/consent.js';
-import { ExtensionManager } from '../../config/extension-manager.js';
+import {
+  ExtensionManager,
+  inferInstallMetadata,
+} from '../../config/extension-manager.js';
 import { loadSettings } from '../../config/settings.js';
 import { promptForSetting } from '../../config/extensions/extensionSettings.js';
+import { exitCli } from '../utils.js';
 
 interface InstallArgs {
   source: string;
@@ -29,37 +29,12 @@ interface InstallArgs {
 
 export async function handleInstall(args: InstallArgs) {
   try {
-    let installMetadata: ExtensionInstallMetadata;
     const { source } = args;
-    if (
-      source.startsWith('http://') ||
-      source.startsWith('https://') ||
-      source.startsWith('git@') ||
-      source.startsWith('sso://')
-    ) {
-      installMetadata = {
-        source,
-        type: 'git',
-        ref: args.ref,
-        autoUpdate: args.autoUpdate,
-        allowPreRelease: args.allowPreRelease,
-      };
-    } else {
-      if (args.ref || args.autoUpdate) {
-        throw new Error(
-          '--ref and --auto-update are not applicable for local extensions.',
-        );
-      }
-      try {
-        await stat(source);
-        installMetadata = {
-          source,
-          type: 'local',
-        };
-      } catch {
-        throw new Error('Install source not found.');
-      }
-    }
+    const installMetadata = await inferInstallMetadata(source, {
+      ref: args.ref,
+      autoUpdate: args.autoUpdate,
+      allowPreRelease: args.allowPreRelease,
+    });
 
     const requestConsent = args.consent
       ? () => Promise.resolve(true)
@@ -124,11 +99,17 @@ export const installCommand: CommandModule = {
       }),
   handler: async (argv) => {
     await handleInstall({
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
       source: argv['source'] as string,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
       ref: argv['ref'] as string | undefined,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
       autoUpdate: argv['auto-update'] as boolean | undefined,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
       allowPreRelease: argv['pre-release'] as boolean | undefined,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
       consent: argv['consent'] as boolean | undefined,
     });
+    await exitCli();
   },
 };

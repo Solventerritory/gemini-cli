@@ -239,6 +239,7 @@ jobs:
           wombat-token-cli: '${{ secrets.WOMBAT_TOKEN_CLI }}'
           wombat-token-a2a-server: '${{ secrets.WOMBAT_TOKEN_A2A_SERVER }}'
           github-token: '${{ secrets.GITHUB_TOKEN }}'
+          github-release-token: '${{ secrets.GEMINI_CLI_ROBOT_GITHUB_PAT }}'
           dry-run: '${{ github.event.inputs.dry_run }}'
           previous-tag: '${{ needs.calculate-versions.outputs.PREVIOUS_PREVIEW_TAG }}'
           working-directory: './release'
@@ -261,7 +262,7 @@ jobs:
           gh issue create \
             --title 'Promote Release Failed for ${RELEASE_TAG} on $(date +'%Y-%m-%d')' \
             --body 'The promote-release workflow failed during preview publish. See the full run for details: ${DETAILS_URL}' \
-            --label 'kind/bug,release-failure,priority/p0'
+            --label 'release-failure,priority/p0'
 
   publish-stable:
     name: 'Publish stable'
@@ -305,6 +306,7 @@ jobs:
           wombat-token-cli: '${{ secrets.WOMBAT_TOKEN_CLI }}'
           wombat-token-a2a-server: '${{ secrets.WOMBAT_TOKEN_A2A_SERVER }}'
           github-token: '${{ secrets.GITHUB_TOKEN }}'
+          github-release-token: '${{ secrets.GEMINI_CLI_ROBOT_GITHUB_PAT }}'
           dry-run: '${{ github.event.inputs.dry_run }}'
           previous-tag: '${{ needs.calculate-versions.outputs.PREVIOUS_STABLE_TAG }}'
           working-directory: './release'
@@ -327,7 +329,7 @@ jobs:
           gh issue create \
             --title 'Promote Release Failed for ${RELEASE_TAG} on $(date +'%Y-%m-%d')' \
             --body 'The promote-release workflow failed during stable publish. See the full run for details: ${DETAILS_URL}' \
-            --label 'kind/bug,release-failure,priority/p0'
+            --label 'release-failure,priority/p0'
 
   nightly-pr:
     name: 'Create Nightly PR'
@@ -390,7 +392,7 @@ jobs:
           branch-name: '${{ steps.release_branch.outputs.BRANCH_NAME }}'
           pr-title: 'chore(release): bump version to ${{ needs.calculate-versions.outputs.NEXT_NIGHTLY_VERSION }}'
           pr-body: 'Automated version bump to prepare for the next nightly release.'
-          github-token: '${{ secrets.GEMINI_CLI_ROBOT_GITHUB_PAT }}'
+          github-token: '${{ secrets.GITHUB_TOKEN }}'
           dry-run: '${{ github.event.inputs.dry_run }}'
 
       - name: 'Create Issue on Failure'
@@ -403,4 +405,4 @@ jobs:
           gh issue create \
             --title 'Promote Release Failed for ${RELEASE_TAG} on $(date +'%Y-%m-%d')' \
             --body 'The promote-release workflow failed during nightly PR creation. See the full run for details: ${DETAILS_URL}' \
-            --label 'kind/bug,release-failure,priority/p0'
+            --label 'release-failure,priority/p0'

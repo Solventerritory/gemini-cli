@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 Google LLC
+ * Copyright 2026 Google LLC
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -9,11 +9,13 @@ import type {
   HistoryItem,
   ThoughtSummary,
   ConsoleMessageItem,
-  ShellConfirmationRequest,
   ConfirmationRequest,
+  QuotaStats,
   LoopDetectionConfirmationRequest,
   HistoryItemWithoutId,
   StreamingState,
+  ActiveHook,
+  PermissionConfirmationRequest,
 } from '../types.js';
 import type { CommandContext, SlashCommand } from '../commands/types.js';
 import type { TextBuffer } from '../components/shared/text-buffer.js';
@@ -23,7 +25,12 @@ import type {
   UserTierId,
   IdeInfo,
   FallbackIntent,
+  ValidationIntent,
+  AgentDefinition,
+  FolderDiscoveryResults,
+  PolicyUpdateConfirmationRequest,
 } from '@google/gemini-cli-core';
+import { type TransientMessageType } from '../../utils/events.js';
 import type { DOMElement } from 'ink';
 import type { SessionStatsState } from '../contexts/SessionContext.js';
 import type { ExtensionUpdateState } from '../state/extensions.js';
@@ -32,16 +39,37 @@ import type { UpdateObject } from '../utils/updateCheck.js';
 export interface ProQuotaDialogRequest {
   failedModel: string;
   fallbackModel: string;
+  message: string;
+  isTerminalQuotaError: boolean;
+  isModelNotFoundError?: boolean;
   resolve: (intent: FallbackIntent) => void;
+}
+
+export interface ValidationDialogRequest {
+  validationLink?: string;
+  validationDescription?: string;
+  learnMoreUrl?: string;
+  resolve: (intent: ValidationIntent) => void;
 }
 
 import { type UseHistoryManagerReturn } from '../hooks/useHistoryManager.js';
 import { type RestartReason } from '../hooks/useIdeTrustListener.js';
+import type { TerminalBackgroundColor } from '../utils/terminalCapabilityManager.js';
+import type { BackgroundShell } from '../hooks/shellCommandProcessor.js';
+
+export interface QuotaState {
+  userTier: UserTierId | undefined;
+  stats: QuotaStats | undefined;
+  proQuotaRequest: ProQuotaDialogRequest | null;
+  validationRequest: ValidationDialogRequest | null;
+}
 
 export interface UIState {
   history: HistoryItem[];
   historyManager: UseHistoryManagerReturn;
   isThemeDialogOpen: boolean;
+  shouldShowRetentionWarning: boolean;
+  sessionsToDeleteCount: number;
   themeError: string | null;
   isAuthenticating: boolean;
   isConfigInitialized: boolean;
@@ -56,15 +84,22 @@ export interface UIState {
   debugMessage: string;
   quittingMessages: HistoryItem[] | null;
   isSettingsDialogOpen: boolean;
+  isSessionBrowserOpen: boolean;
   isModelDialogOpen: boolean;
+  isAgentConfigDialogOpen: boolean;
+  selectedAgentName?: string;
+  selectedAgentDisplayName?: string;
+  selectedAgentDefinition?: AgentDefinition;
   isPermissionsDialogOpen: boolean;
+  permissionsDialogProps: { targetDirectory?: string } | null;
   slashCommands: readonly SlashCommand[] | undefined;
   pendingSlashCommandHistoryItems: HistoryItemWithoutId[];
   commandContext: CommandContext;
-  shellConfirmationRequest: ShellConfirmationRequest | null;
-  confirmationRequest: ConfirmationRequest | null;
+  commandConfirmationRequest: ConfirmationRequest | null;
+  authConsentRequest: ConfirmationRequest | null;
   confirmUpdateExtensionRequests: ConfirmationRequest[];
   loopDetectionConfirmationRequest: LoopDetectionConfirmationRequest | null;
+  permissionConfirmationRequest: PermissionConfirmationRequest | null;
   geminiMdFileCount: number;
   streamingState: StreamingState;
   initError: string | null;
@@ -76,8 +111,12 @@ export interface UIState {
   inputWidth: number;
   suggestionsWidth: number;
   isInputActive: boolean;
+  isResuming: boolean;
   shouldShowIdePrompt: boolean;
   isFolderTrustDialogOpen: boolean;
+  folderDiscoveryResults: FolderDiscoveryResults | null;
+  isPolicyUpdateDialogOpen: boolean;
+  policyUpdateConfirmationRequest: PolicyUpdateConfirmationRequest | undefined;
   isTrustedFolder: boolean | undefined;
   constrainHeight: boolean;
   showErrorDetails: boolean;
@@ -87,15 +126,18 @@ export interface UIState {
   ctrlCPressedOnce: boolean;
   ctrlDPressedOnce: boolean;
   showEscapePrompt: boolean;
+  shortcutsHelpVisible: boolean;
+  cleanUiDetailsVisible: boolean;
   elapsedTime: number;
-  currentLoadingPhrase: string;
+  currentLoadingPhrase: string | undefined;
   historyRemountKey: number;
+  activeHooks: ActiveHook[];
   messageQueue: string[];
   queueErrorMessage: string | null;
-  showAutoAcceptIndicator: ApprovalMode;
+  showApprovalModeIndicator: ApprovalMode;
+  allowPlanMode: boolean;
   // Quota-related state
-  userTier: UserTierId | undefined;
-  proQuotaRequest: ProQuotaDialogRequest | null;
+  quota: QuotaState;
   currentModel: string;
   contextFileNames: string[];
   errorCount: number;
@@ -120,9 +162,33 @@ export interface UIState {
   isRestarting: boolean;
   extensionsUpdateState: Map<string, ExtensionUpdateState>;
   activePtyId: number | undefined;
+  backgroundShellCount: number;
+  isBackgroundShellVisible: boolean;
   embeddedShellFocused: boolean;
   showDebugProfiler: boolean;
   showFullTodos: boolean;
+  copyModeEnabled: boolean;
+  bannerData: {
+    defaultText: string;
+    warningText: string;
+  };
+  bannerVisible: boolean;
+  customDialog: React.ReactNode | null;
+  terminalBackgroundColor: TerminalBackgroundColor;
+  settingsNonce: number;
+  backgroundShells: Map<number, BackgroundShell>;
+  activeBackgroundShellPid: number | null;
+  backgroundShellHeight: number;
+  isBackgroundShellListOpen: boolean;
+  adminSettingsChanged: boolean;
+  newAgents: AgentDefinition[] | null;
+  showIsExpandableHint: boolean;
+  hintMode: boolean;
+  hintBuffer: string;
+  transientMessage: {
+    text: string;
+    type: TransientMessageType;
+  } | null;
 }
 
 export const UIStateContext = createContext<UIState | null>(null);

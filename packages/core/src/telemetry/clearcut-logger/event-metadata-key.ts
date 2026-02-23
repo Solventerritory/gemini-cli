@@ -7,7 +7,7 @@
 // Defines valid event metadata keys for Clearcut logging.
 export enum EventMetadataKey {
   // Deleted enums: 24
-  // Next ID: 122
+  // Next ID: 159
 
   GEMINI_CLI_KEY_UNKNOWN = 0,
 
@@ -93,11 +93,11 @@ export enum EventMetadataKey {
   // Replace Tool Call Event Keys
   // ===========================================================================
 
-  // Logs a smart edit tool strategy choice.
-  GEMINI_CLI_SMART_EDIT_STRATEGY = 109,
+  // Logs a edit tool strategy choice.
+  GEMINI_CLI_EDIT_STRATEGY = 109,
 
-  // Logs a smart edit correction event.
-  GEMINI_CLI_SMART_EDIT_CORRECTION = 110,
+  // Logs a edit correction event.
+  GEMINI_CLI_EDIT_CORRECTION = 110,
 
   // Logs the reason for web fetch fallback.
   GEMINI_CLI_WEB_FETCH_FALLBACK_REASON = 116,
@@ -190,6 +190,15 @@ export enum EventMetadataKey {
 
   // Logs active user settings
   GEMINI_CLI_USER_SETTINGS = 84,
+
+  // Logs the name of the GitHub Action workflow that triggered the session.
+  GEMINI_CLI_GH_WORKFLOW_NAME = 130,
+
+  // Logs the active experiment IDs for the session.
+  GEMINI_CLI_EXPERIMENT_IDS = 131,
+
+  // Logs the repository name of the GitHub Action that triggered the session.
+  GEMINI_CLI_GH_REPOSITORY_NAME_HASH = 132,
 
   // ==========================================================================
   // Loop Detected Event Keys
@@ -473,4 +482,127 @@ export enum EventMetadataKey {
 
   // Logs whether the agent recovery attempt was successful.
   GEMINI_CLI_AGENT_RECOVERY_SUCCESS = 124,
+
+  // Logs whether the session is interactive.
+  GEMINI_CLI_INTERACTIVE = 125,
+
+  // ==========================================================================
+  // LLM Loop Check Event Keys
+  // ==========================================================================
+
+  // Logs the confidence score from the flash model loop check.
+  GEMINI_CLI_LLM_LOOP_CHECK_FLASH_CONFIDENCE = 126,
+
+  // Logs the name of the main model used for the secondary loop check.
+  GEMINI_CLI_LLM_LOOP_CHECK_MAIN_MODEL = 127,
+
+  // Logs the confidence score from the main model loop check.
+  GEMINI_CLI_LLM_LOOP_CHECK_MAIN_MODEL_CONFIDENCE = 128,
+
+  // Logs the model that confirmed the loop.
+  GEMINI_CLI_LOOP_DETECTED_CONFIRMED_BY_MODEL = 129,
+
+  // ==========================================================================
+  // Hook Call Event Keys
+  // ==========================================================================
+
+  // Logs the name of the hook event (e.g., 'BeforeTool', 'AfterModel').
+  GEMINI_CLI_HOOK_EVENT_NAME = 133,
+
+  // Logs the duration of the hook execution in milliseconds.
+  GEMINI_CLI_HOOK_DURATION_MS = 134,
+
+  // Logs whether the hook execution was successful.
+  GEMINI_CLI_HOOK_SUCCESS = 135,
+
+  // Logs the exit code of the hook script (if applicable).
+  GEMINI_CLI_HOOK_EXIT_CODE = 136,
+
+  // Logs CPU information of user machine.
+  GEMINI_CLI_CPU_INFO = 137,
+
+  // Logs number of CPU cores of user machine.
+  GEMINI_CLI_CPU_CORES = 138,
+
+  // Logs GPU information of user machine.
+  GEMINI_CLI_GPU_INFO = 139,
+
+  // Logs total RAM in GB of user machine.
+  GEMINI_CLI_RAM_TOTAL_GB = 140,
+
+  // ==========================================================================
+  // Approval Mode Event Keys
+  // ==========================================================================
+
+  // Logs the active approval mode in the session.
+  GEMINI_CLI_ACTIVE_APPROVAL_MODE = 141,
+
+  // Logs the new approval mode.
+  GEMINI_CLI_APPROVAL_MODE_TO = 142,
+
+  // Logs the duration spent in an approval mode in milliseconds.
+  GEMINI_CLI_APPROVAL_MODE_DURATION_MS = 143,
+
+  // ==========================================================================
+  // Rewind Event Keys
+  // ==========================================================================
+
+  // Logs the outcome of a rewind operation.
+  GEMINI_CLI_REWIND_OUTCOME = 144,
+
+  // Model Routing Event Keys (Cont.)
+  // ==========================================================================
+
+  // Logs the reasoning for the routing decision.
+  GEMINI_CLI_ROUTING_REASONING = 145,
+
+  // Logs whether numerical routing was enabled.
+  GEMINI_CLI_ROUTING_NUMERICAL_ENABLED = 146,
+
+  // Logs the classifier threshold used.
+  GEMINI_CLI_ROUTING_CLASSIFIER_THRESHOLD = 147,
+
+  // ==========================================================================
+  // Tool Output Masking Event Keys
+  // ==========================================================================
+
+  // Logs the total tokens in the prunable block before masking.
+  GEMINI_CLI_TOOL_OUTPUT_MASKING_TOKENS_BEFORE = 148,
+
+  // Logs the total tokens in the masked remnants after masking.
+  GEMINI_CLI_TOOL_OUTPUT_MASKING_TOKENS_AFTER = 149,
+
+  // Logs the number of tool outputs masked in this operation.
+  GEMINI_CLI_TOOL_OUTPUT_MASKING_MASKED_COUNT = 150,
+
+  // Logs the total prunable tokens identified at the trigger point.
+  GEMINI_CLI_TOOL_OUTPUT_MASKING_TOTAL_PRUNABLE_TOKENS = 151,
+
+  // Ask User Stats Event Keys
+  // ==========================================================================
+
+  // Logs the types of questions asked in the ask_user tool.
+  GEMINI_CLI_ASK_USER_QUESTION_TYPES = 152,
+
+  // Logs whether the ask_user dialog was dismissed.
+  GEMINI_CLI_ASK_USER_DISMISSED = 153,
+
+  // Logs whether the ask_user dialog was submitted empty.
+  GEMINI_CLI_ASK_USER_EMPTY_SUBMISSION = 154,
+
+  // Logs the number of questions answered in the ask_user tool.
+  GEMINI_CLI_ASK_USER_ANSWER_COUNT = 155,
+
+  // ==========================================================================
+  // Keychain & Token Storage Event Keys
+  // ==========================================================================
+
+  // Logs whether the keychain is available.
+  GEMINI_CLI_KEYCHAIN_AVAILABLE = 156,
+
+  // Logs the type of token storage initialized.
+  GEMINI_CLI_TOKEN_STORAGE_TYPE = 157,
+
+  // Logs whether the token storage type was forced by an environment variable.
+  GEMINI_CLI_TOKEN_STORAGE_FORCED = 158,
 }

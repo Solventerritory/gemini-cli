@@ -5,6 +5,7 @@
  */
 
 import { render } from '../../test-utils/render.js';
+import { waitFor } from '../../test-utils/async.js';
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { ApiAuthDialog } from './ApiAuthDialog.js';
 import { useKeypress } from '../hooks/useKeypress.js';
@@ -12,8 +13,18 @@ import {
   useTextBuffer,
   type TextBuffer,
 } from '../components/shared/text-buffer.js';
+import { clearApiKey } from '@google/gemini-cli-core';
 
 // Mocks
+vi.mock('@google/gemini-cli-core', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@google/gemini-cli-core')>();
+  return {
+    ...actual,
+    clearApiKey: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
 vi.mock('../hooks/useKeypress.js', () => ({
   useKeypress: vi.fn(),
 }));
@@ -24,7 +35,7 @@ vi.mock('../components/shared/text-buffer.js', () => ({
 
 vi.mock('../contexts/UIStateContext.js', () => ({
   useUIState: vi.fn(() => ({
-    mainAreaWidth: 80,
+    terminalWidth: 80,
   })),
 }));
 
@@ -37,7 +48,8 @@ describe('ApiAuthDialog', () => {
   let mockBuffer: TextBuffer;
 
   beforeEach(() => {
-    vi.resetAllMocks();
+    vi.clearAllMocks();
+    vi.stubEnv('GEMINI_API_KEY', '');
     mockBuffer = {
       text: '',
       lines: [''],
@@ -53,21 +65,24 @@ describe('ApiAuthDialog', () => {
     mockedUseTextBuffer.mockReturnValue(mockBuffer);
   });
 
-  it('renders correctly', () => {
-    const { lastFrame } = render(
+  it('renders correctly', async () => {
+    const { lastFrame, waitUntilReady, unmount } = render(
       <ApiAuthDialog onSubmit={onSubmit} onCancel={onCancel} />,
     );
+    await waitUntilReady();
     expect(lastFrame()).toMatchSnapshot();
+    unmount();
   });
 
-  it('renders with a defaultValue', () => {
-    render(
+  it('renders with a defaultValue', async () => {
+    const { waitUntilReady, unmount } = render(
       <ApiAuthDialog
         onSubmit={onSubmit}
         onCancel={onCancel}
         defaultValue="test-key"
       />,
     );
+    await waitUntilReady();
     expect(mockedUseTextBuffer).toHaveBeenCalledWith(
       expect.objectContaining({
         initialText: 'test-key',
@@ -76,50 +91,77 @@ describe('ApiAuthDialog', () => {
         }),
       }),
     );
+    unmount();
   });
 
-  it('calls onSubmit when the text input is submitted', () => {
-    mockBuffer.text = 'submitted-key';
-    render(<ApiAuthDialog onSubmit={onSubmit} onCancel={onCancel} />);
-    const keypressHandler = mockedUseKeypress.mock.calls[0][0];
-
-    keypressHandler({
-      name: 'return',
+  it.each([
+    {
+      keyName: 'return',
       sequence: '\r',
-      ctrl: false,
-      meta: false,
-      shift: false,
-      paste: false,
-    });
+      expectedCall: onSubmit,
+      args: ['submitted-key'],
+    },
+    { keyName: 'escape', sequence: '\u001b', expectedCall: onCancel, args: [] },
+  ])(
+    'calls $expectedCall.name when $keyName is pressed',
+    async ({ keyName, sequence, expectedCall, args }) => {
+      mockBuffer.text = 'submitted-key'; // Set for the onSubmit case
+      const { waitUntilReady, unmount } = render(
+        <ApiAuthDialog onSubmit={onSubmit} onCancel={onCancel} />,
+      );
+      await waitUntilReady();
+      // calls[0] is the ApiAuthDialog's useKeypress (Ctrl+C handler)
+      // calls[1] is the TextInput's useKeypress (typing handler)
+      const keypressHandler = mockedUseKeypress.mock.calls[1][0];
 
-    expect(onSubmit).toHaveBeenCalledWith('submitted-key');
-  });
+      keypressHandler({
+        name: keyName,
+        shift: false,
+        alt: false,
+        ctrl: false,
+        cmd: false,
+        sequence,
+      });
 
-  it('calls onCancel when the text input is cancelled', () => {
-    render(<ApiAuthDialog onSubmit={onSubmit} onCancel={onCancel} />);
-    const keypressHandler = mockedUseKeypress.mock.calls[0][0];
+      expect(expectedCall).toHaveBeenCalledWith(...args);
+      unmount();
+    },
+  );
 
-    keypressHandler({
-      name: 'escape',
-      sequence: '\u001b',
-      ctrl: false,
-      meta: false,
-      shift: false,
-      paste: false,
-    });
-
-    expect(onCancel).toHaveBeenCalled();
-  });
-
-  it('displays an error message', () => {
-    const { lastFrame } = render(
+  it('displays an error message', async () => {
+    const { lastFrame, waitUntilReady, unmount } = render(
       <ApiAuthDialog
         onSubmit={onSubmit}
         onCancel={onCancel}
         error="Invalid API Key"
       />,
     );
+    await waitUntilReady();
 
     expect(lastFrame()).toContain('Invalid API Key');
+    unmount();
+  });
+
+  it('calls clearApiKey and clears buffer when Ctrl+C is pressed', async () => {
+    const { waitUntilReady, unmount } = render(
+      <ApiAuthDialog onSubmit={onSubmit} onCancel={onCancel} />,
+    );
+    await waitUntilReady();
+    // Call 0 is ApiAuthDialog (isActive: true)
+    // Call 1 is TextInput (isActive: true, priority: true)
+    const keypressHandler = mockedUseKeypress.mock.calls[0][0];
+
+    keypressHandler({
+      name: 'c',
+      shift: false,
+      ctrl: true,
+      cmd: false,
+    });
+
+    await waitFor(() => {
+      expect(clearApiKey).toHaveBeenCalled();
+      expect(mockBuffer.setText).toHaveBeenCalledWith('');
+    });
+    unmount();
   });
 });

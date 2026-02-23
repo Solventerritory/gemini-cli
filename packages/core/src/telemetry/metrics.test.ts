@@ -20,7 +20,12 @@ import {
   ApiRequestPhase,
 } from './metrics.js';
 import { makeFakeConfig } from '../test-utils/config.js';
-import { ModelRoutingEvent, AgentFinishEvent } from './types.js';
+import {
+  ModelRoutingEvent,
+  AgentFinishEvent,
+  KeychainAvailabilityEvent,
+  TokenStorageInitializationEvent,
+} from './types.js';
 import { AgentTerminateMode } from '../agents/types.js';
 
 const mockCounterAddFn: Mock<
@@ -96,12 +101,15 @@ describe('Telemetry Metrics', () => {
   let recordAgentRunMetricsModule: typeof import('./metrics.js').recordAgentRunMetrics;
   let recordLinesChangedModule: typeof import('./metrics.js').recordLinesChanged;
   let recordSlowRenderModule: typeof import('./metrics.js').recordSlowRender;
+  let recordPlanExecutionModule: typeof import('./metrics.js').recordPlanExecution;
+  let recordKeychainAvailabilityModule: typeof import('./metrics.js').recordKeychainAvailability;
+  let recordTokenStorageInitializationModule: typeof import('./metrics.js').recordTokenStorageInitialization;
 
   beforeEach(async () => {
     vi.resetModules();
     vi.doMock('@opentelemetry/api', () => {
       const actualApi = originalOtelMockFactory();
-      (actualApi.metrics.getMeter as Mock).mockReturnValue(mockMeterInstance);
+      actualApi.metrics.getMeter.mockReturnValue(mockMeterInstance);
       return actualApi;
     });
 
@@ -140,6 +148,11 @@ describe('Telemetry Metrics', () => {
     recordAgentRunMetricsModule = metricsJsModule.recordAgentRunMetrics;
     recordLinesChangedModule = metricsJsModule.recordLinesChanged;
     recordSlowRenderModule = metricsJsModule.recordSlowRender;
+    recordPlanExecutionModule = metricsJsModule.recordPlanExecution;
+    recordKeychainAvailabilityModule =
+      metricsJsModule.recordKeychainAvailability;
+    recordTokenStorageInitializationModule =
+      metricsJsModule.recordTokenStorageInitialization;
 
     const otelApiModule = await import('@opentelemetry/api');
 
@@ -214,6 +227,29 @@ describe('Telemetry Metrics', () => {
         'session.id': 'test-session-id',
         'installation.id': 'test-installation-id',
         'user.email': 'test@example.com',
+      });
+    });
+  });
+
+  describe('recordPlanExecution', () => {
+    it('does not record metrics if not initialized', () => {
+      const config = makeFakeConfig({});
+      recordPlanExecutionModule(config, { approval_mode: 'default' });
+      expect(mockCounterAddFn).not.toHaveBeenCalled();
+    });
+
+    it('records a plan execution event when initialized', () => {
+      const config = makeFakeConfig({});
+      initializeMetricsModule(config);
+      recordPlanExecutionModule(config, { approval_mode: 'autoEdit' });
+
+      // Called for session, then for plan execution
+      expect(mockCounterAddFn).toHaveBeenCalledTimes(2);
+      expect(mockCounterAddFn).toHaveBeenNthCalledWith(2, 1, {
+        'session.id': 'test-session-id',
+        'installation.id': 'test-installation-id',
+        'user.email': 'test@example.com',
+        approval_mode: 'autoEdit',
       });
     });
   });
@@ -478,6 +514,8 @@ describe('Telemetry Metrics', () => {
         'user.email': 'test@example.com',
         'routing.decision_model': 'gemini-pro',
         'routing.decision_source': 'default',
+        'routing.failed': false,
+        'routing.reasoning': 'test-reason',
       });
       // The session counter is called once on init
       expect(mockCounterAddFn).toHaveBeenCalledTimes(1);
@@ -487,7 +525,7 @@ describe('Telemetry Metrics', () => {
       initializeMetricsModule(mockConfig);
       const event = new ModelRoutingEvent(
         'gemini-pro',
-        'classifier',
+        'Classifier',
         200,
         'test-reason',
         true,
@@ -500,7 +538,9 @@ describe('Telemetry Metrics', () => {
         'installation.id': 'test-installation-id',
         'user.email': 'test@example.com',
         'routing.decision_model': 'gemini-pro',
-        'routing.decision_source': 'classifier',
+        'routing.decision_source': 'Classifier',
+        'routing.failed': true,
+        'routing.reasoning': 'test-reason',
       });
 
       expect(mockCounterAddFn).toHaveBeenCalledTimes(2);
@@ -508,7 +548,10 @@ describe('Telemetry Metrics', () => {
         'session.id': 'test-session-id',
         'installation.id': 'test-installation-id',
         'user.email': 'test@example.com',
-        'routing.decision_source': 'classifier',
+        'routing.decision_model': 'gemini-pro',
+        'routing.decision_source': 'Classifier',
+        'routing.failed': true,
+        'routing.reasoning': 'test-reason',
         'routing.error_message': 'test-error',
       });
     });
@@ -1340,6 +1383,169 @@ describe('Telemetry Metrics', () => {
           'Baseline value is zero, skipping comparison.',
         );
         expect(mockHistogramRecordFn).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('recordHookCallMetrics', () => {
+      let recordHookCallMetricsModule: typeof import('./metrics.js').recordHookCallMetrics;
+
+      beforeEach(async () => {
+        recordHookCallMetricsModule = (await import('./metrics.js'))
+          .recordHookCallMetrics;
+      });
+
+      it('should record hook call metrics with counter and histogram', () => {
+        initializeMetricsModule(mockConfig);
+        mockCounterAddFn.mockClear();
+        mockHistogramRecordFn.mockClear();
+
+        recordHookCallMetricsModule(
+          mockConfig,
+          'BeforeTool',
+          'test-hook',
+          150,
+          true,
+        );
+
+        // Verify counter recorded
+        expect(mockCounterAddFn).toHaveBeenCalledWith(1, {
+          'session.id': 'test-session-id',
+          'installation.id': 'test-installation-id',
+          'user.email': 'test@example.com',
+          hook_event_name: 'BeforeTool',
+          hook_name: 'test-hook',
+          success: true,
+        });
+
+        // Verify histogram recorded
+        expect(mockHistogramRecordFn).toHaveBeenCalledWith(150, {
+          'session.id': 'test-session-id',
+          'installation.id': 'test-installation-id',
+          'user.email': 'test@example.com',
+          hook_event_name: 'BeforeTool',
+          hook_name: 'test-hook',
+          success: true,
+        });
+      });
+
+      it('should always sanitize hook names regardless of content', () => {
+        initializeMetricsModule(mockConfig);
+        mockCounterAddFn.mockClear();
+
+        // Test with a command that has sensitive information
+        recordHookCallMetricsModule(
+          mockConfig,
+          'BeforeTool',
+          '/path/to/.gemini/hooks/check-secrets.sh --api-key=abc123',
+          150,
+          true,
+        );
+
+        // Verify hook name is sanitized (detailed sanitization tested in hook-call-event.test.ts)
+        expect(mockCounterAddFn).toHaveBeenCalledWith(1, {
+          'session.id': 'test-session-id',
+          'installation.id': 'test-installation-id',
+          'user.email': 'test@example.com',
+          hook_event_name: 'BeforeTool',
+          hook_name: 'check-secrets.sh', // Sanitized
+          success: true,
+        });
+      });
+
+      it('should track both success and failure', () => {
+        initializeMetricsModule(mockConfig);
+        mockCounterAddFn.mockClear();
+
+        // Success case
+        recordHookCallMetricsModule(
+          mockConfig,
+          'BeforeTool',
+          'test-hook',
+          100,
+          true,
+        );
+
+        expect(mockCounterAddFn).toHaveBeenNthCalledWith(
+          1,
+          1,
+          expect.objectContaining({
+            hook_event_name: 'BeforeTool',
+            hook_name: 'test-hook',
+            success: true,
+          }),
+        );
+
+        // Failure case
+        recordHookCallMetricsModule(
+          mockConfig,
+          'AfterTool',
+          'test-hook',
+          150,
+          false,
+        );
+
+        expect(mockCounterAddFn).toHaveBeenNthCalledWith(
+          2,
+          1,
+          expect.objectContaining({
+            hook_event_name: 'AfterTool',
+            hook_name: 'test-hook',
+            success: false,
+          }),
+        );
+      });
+    });
+  });
+
+  describe('Keychain and Token Storage Metrics', () => {
+    describe('recordKeychainAvailability', () => {
+      it('should not record metrics if not initialized', () => {
+        const config = makeFakeConfig({});
+        const event = new KeychainAvailabilityEvent(true);
+        recordKeychainAvailabilityModule(config, event);
+        expect(mockCounterAddFn).not.toHaveBeenCalled();
+      });
+
+      it('should record keychain availability when initialized', () => {
+        const config = makeFakeConfig({});
+        initializeMetricsModule(config);
+        mockCounterAddFn.mockClear();
+
+        const event = new KeychainAvailabilityEvent(true);
+        recordKeychainAvailabilityModule(config, event);
+
+        expect(mockCounterAddFn).toHaveBeenCalledWith(1, {
+          'session.id': 'test-session-id',
+          'installation.id': 'test-installation-id',
+          'user.email': 'test@example.com',
+          available: true,
+        });
+      });
+    });
+
+    describe('recordTokenStorageInitialization', () => {
+      it('should not record metrics if not initialized', () => {
+        const config = makeFakeConfig({});
+        const event = new TokenStorageInitializationEvent('hybrid', false);
+        recordTokenStorageInitializationModule(config, event);
+        expect(mockCounterAddFn).not.toHaveBeenCalled();
+      });
+
+      it('should record token storage initialization when initialized', () => {
+        const config = makeFakeConfig({});
+        initializeMetricsModule(config);
+        mockCounterAddFn.mockClear();
+
+        const event = new TokenStorageInitializationEvent('keychain', true);
+        recordTokenStorageInitializationModule(config, event);
+
+        expect(mockCounterAddFn).toHaveBeenCalledWith(1, {
+          'session.id': 'test-session-id',
+          'installation.id': 'test-installation-id',
+          'user.email': 'test@example.com',
+          type: 'keychain',
+          forced: true,
+        });
       });
     });
   });

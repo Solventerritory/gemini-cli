@@ -6,21 +6,23 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { homedir } from 'node:os';
 
-import type { MCPServerConfig } from '@google/gemini-cli-core';
 import {
+  type MCPServerConfig,
   debugLogger,
   GEMINI_DIR,
   getErrorMessage,
   type TelemetrySettings,
+  homedir,
 } from '@google/gemini-cli-core';
 import stripJsonComments from 'strip-json-comments';
 
 export const USER_SETTINGS_DIR = path.join(homedir(), GEMINI_DIR);
 export const USER_SETTINGS_PATH = path.join(USER_SETTINGS_DIR, 'settings.json');
 
-// Reconcile with https://github.com/google-gemini/gemini-cli/blob/b09bc6656080d4d12e1d06734aae2ec33af5c1ed/packages/cli/src/config/settings.ts#L53
+// TODO: Ensure full compatibility with V2 nested settings structure (settings.schema.json).
+// This involves updating the interface and implementing migration logic to support legacy V1 (flat) settings,
+// similar to how packages/cli/src/config/settings.ts handles it.
 export interface Settings {
   mcpServers?: Record<string, MCPServerConfig>;
   coreTools?: string[];
@@ -33,7 +35,9 @@ export interface Settings {
   // Git-aware file filtering settings
   fileFiltering?: {
     respectGitIgnore?: boolean;
+    respectGeminiIgnore?: boolean;
     enableRecursiveFileSearch?: boolean;
+    customIgnoreFilePaths?: string[];
   };
 }
 
@@ -63,6 +67,7 @@ export function loadSettings(workspaceDir: string): Settings {
   try {
     if (fs.existsSync(USER_SETTINGS_PATH)) {
       const userContent = fs.readFileSync(USER_SETTINGS_PATH, 'utf-8');
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
       const parsedUserSettings = JSON.parse(
         stripJsonComments(userContent),
       ) as Settings;
@@ -85,6 +90,7 @@ export function loadSettings(workspaceDir: string): Settings {
   try {
     if (fs.existsSync(workspaceSettingsPath)) {
       const projectContent = fs.readFileSync(workspaceSettingsPath, 'utf-8');
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
       const parsedWorkspaceSettings = JSON.parse(
         stripJsonComments(projectContent),
       ) as Settings;
@@ -116,9 +122,10 @@ export function loadSettings(workspaceDir: string): Settings {
 function resolveEnvVarsInString(value: string): string {
   const envVarRegex = /\$(?:(\w+)|{([^}]+)})/g; // Find $VAR_NAME or ${VAR_NAME}
   return value.replace(envVarRegex, (match, varName1, varName2) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const varName = varName1 || varName2;
     if (process && process.env && typeof process.env[varName] === 'string') {
-      return process.env[varName]!;
+      return process.env[varName];
     }
     return match;
   });
@@ -135,10 +142,12 @@ function resolveEnvVarsInObject<T>(obj: T): T {
   }
 
   if (typeof obj === 'string') {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
     return resolveEnvVarsInString(obj) as unknown as T;
   }
 
   if (Array.isArray(obj)) {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion, @typescript-eslint/no-unsafe-return
     return obj.map((item) => resolveEnvVarsInObject(item)) as unknown as T;
   }
 

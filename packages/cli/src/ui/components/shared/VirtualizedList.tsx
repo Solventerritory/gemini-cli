@@ -17,6 +17,7 @@ import {
 import type React from 'react';
 import { theme } from '../../semantic-colors.js';
 import { useBatchedScroll } from '../../hooks/useBatchedScroll.js';
+import { useUIState } from '../../contexts/UIStateContext.js';
 
 import { type DOMElement, measureElement, Box } from 'ink';
 
@@ -59,7 +60,7 @@ function findLastIndex<T>(
   predicate: (value: T, index: number, obj: T[]) => unknown,
 ): number {
   for (let i = array.length - 1; i >= 0; i--) {
-    if (predicate(array[i]!, i, array)) {
+    if (predicate(array[i], i, array)) {
       return i;
     }
   }
@@ -78,6 +79,7 @@ function VirtualizedList<T>(
     initialScrollIndex,
     initialScrollOffsetInIndex,
   } = props;
+  const { copyModeEnabled } = useUIState();
   const dataRef = useRef(data);
   useEffect(() => {
     dataRef.current = data;
@@ -192,7 +194,7 @@ function VirtualizedList<T>(
         return { index: 0, offset: 0 };
       }
 
-      return { index, offset: scrollTop - offsets[index]! };
+      return { index, offset: scrollTop - offsets[index] };
     },
     [],
   );
@@ -474,15 +476,21 @@ function VirtualizedList<T>(
   return (
     <Box
       ref={containerRef}
-      overflowY="scroll"
+      overflowY={copyModeEnabled ? 'hidden' : 'scroll'}
       overflowX="hidden"
-      scrollTop={scrollTop}
+      scrollTop={copyModeEnabled ? 0 : scrollTop}
       scrollbarThumbColor={props.scrollbarThumbColor ?? theme.text.secondary}
       width="100%"
       height="100%"
       flexDirection="column"
+      paddingRight={copyModeEnabled ? 0 : 1}
     >
-      <Box flexShrink={0} width="100%" flexDirection="column">
+      <Box
+        flexShrink={0}
+        width="100%"
+        flexDirection="column"
+        marginTop={copyModeEnabled ? -scrollTop : 0}
+      >
         <Box height={topSpacerHeight} flexShrink={0} />
         {renderedItems}
         <Box height={bottomSpacerHeight} flexShrink={0} />
@@ -491,6 +499,7 @@ function VirtualizedList<T>(
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
 const VirtualizedListWithForwardRef = forwardRef(VirtualizedList) as <T>(
   props: VirtualizedListProps<T> & { ref?: React.Ref<VirtualizedListRef<T>> },
 ) => React.ReactElement;

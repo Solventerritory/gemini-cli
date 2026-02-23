@@ -11,7 +11,7 @@ Before using sandboxing, you need to install and set up the Gemini CLI:
 npm install -g @google/gemini-cli
 ```
 
-To verify the installation
+To verify the installation:
 
 ```bash
 gemini --version
@@ -82,12 +82,13 @@ gemini -p "run the test suite"
 Built-in profiles (set via `SEATBELT_PROFILE` env var):
 
 - `permissive-open` (default): Write restrictions, network allowed
-- `permissive-closed`: Write restrictions, no network
 - `permissive-proxied`: Write restrictions, network via proxy
 - `restrictive-open`: Strict restrictions, network allowed
-- `restrictive-closed`: Maximum restrictions
+- `restrictive-proxied`: Strict restrictions, network via proxy
+- `strict-open`: Read and write restrictions, network allowed
+- `strict-proxied`: Read and write restrictions, network via proxy
 
-### Custom Sandbox Flags
+### Custom sandbox flags
 
 For container-based sandboxing, you can inject custom flags into the `docker` or
 `podman` command using the `SANDBOX_FLAGS` environment variable. This is useful
@@ -166,6 +167,6 @@ gemini -s -p "run shell command: mount | grep workspace"
 
 ## Related documentation
 
-- [Configuration](../get-started/configuration.md): Full configuration options.
-- [Commands](./commands.md): Available commands.
-- [Troubleshooting](../troubleshooting.md): General troubleshooting.
+- [Configuration](../reference/configuration.md): Full configuration options.
+- [Commands](../reference/commands.md): Available commands.
+- [Troubleshooting](../resources/troubleshooting.md): General troubleshooting.

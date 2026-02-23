@@ -7,6 +7,99 @@
 import type { AnyDeclarativeTool, AnyToolInvocation } from '../index.js';
 import { isTool } from '../index.js';
 import { SHELL_TOOL_NAMES } from './shell-utils.js';
+import levenshtein from 'fast-levenshtein';
+import { ApprovalMode } from '../policy/types.js';
+import { CoreToolCallStatus } from '../scheduler/types.js';
+import {
+  ASK_USER_DISPLAY_NAME,
+  WRITE_FILE_DISPLAY_NAME,
+  EDIT_DISPLAY_NAME,
+} from '../tools/tool-names.js';
+
+/**
+ * Options for determining if a tool call should be hidden in the CLI history.
+ */
+export interface ShouldHideToolCallParams {
+  /** The display name of the tool. */
+  displayName: string;
+  /** The current status of the tool call. */
+  status: CoreToolCallStatus;
+  /** The approval mode active when the tool was called. */
+  approvalMode?: ApprovalMode;
+  /** Whether the tool has produced a result for display. */
+  hasResultDisplay: boolean;
+}
+
+/**
+ * Determines if a tool call should be hidden from the standard tool history UI.
+ *
+ * We hide tools in several cases:
+ * 1. Ask User tools that are in progress, displayed via specialized UI.
+ * 2. Ask User tools that errored without result display, typically param
+ *    validation errors that the agent automatically recovers from.
+ * 3. WriteFile and Edit tools when in Plan Mode, redundant because the
+ *    resulting plans are displayed separately upon exiting plan mode.
+ */
+export function shouldHideToolCall(params: ShouldHideToolCallParams): boolean {
+  const { displayName, status, approvalMode, hasResultDisplay } = params;
+
+  switch (displayName) {
+    case ASK_USER_DISPLAY_NAME:
+      switch (status) {
+        case CoreToolCallStatus.Scheduled:
+        case CoreToolCallStatus.Validating:
+        case CoreToolCallStatus.Executing:
+        case CoreToolCallStatus.AwaitingApproval:
+          return true;
+        case CoreToolCallStatus.Error:
+          return !hasResultDisplay;
+        default:
+          return false;
+      }
+    case WRITE_FILE_DISPLAY_NAME:
+    case EDIT_DISPLAY_NAME:
+      return approvalMode === ApprovalMode.PLAN;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Generates a suggestion string for a tool name that was not found in the registry.
+ * It finds the closest matches based on Levenshtein distance.
+ * @param unknownToolName The tool name that was not found.
+ * @param allToolNames The list of all available tool names.
+ * @param topN The number of suggestions to return. Defaults to 3.
+ * @returns A suggestion string like " Did you mean 'tool'?" or " Did you mean one of: 'tool1', 'tool2'?", or an empty string if no suggestions are found.
+ */
+export function getToolSuggestion(
+  unknownToolName: string,
+  allToolNames: string[],
+  topN = 3,
+): string {
+  const matches = allToolNames.map((toolName) => ({
+    name: toolName,
+    distance: levenshtein.get(unknownToolName, toolName),
+  }));
+
+  matches.sort((a, b) => a.distance - b.distance);
+
+  const topNResults = matches.slice(0, topN);
+
+  if (topNResults.length === 0) {
+    return '';
+  }
+
+  const suggestedNames = topNResults
+    .map((match) => `"${match.name}"`)
+    .join(', ');
+
+  if (topNResults.length > 1) {
+    return ` Did you mean one of: ${suggestedNames}?`;
+  } else {
+    return ` Did you mean ${suggestedNames}?`;
+  }
+}
 
 /**
  * Checks if a tool invocation matches any of a list of patterns.
@@ -29,7 +122,7 @@ export function doesToolInvocationMatch(
   if (isTool(toolOrToolName)) {
     toolNames = [toolOrToolName.name, toolOrToolName.constructor.name];
   } else {
-    toolNames = [toolOrToolName as string];
+    toolNames = [toolOrToolName];
   }
 
   if (toolNames.some((name) => SHELL_TOOL_NAMES.includes(name))) {
@@ -66,6 +159,7 @@ export function doesToolInvocationMatch(
         // This invocation has no command - nothing to check.
         continue;
       }
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
       command = String((invocation.params as { command: string }).command);
     }
 
