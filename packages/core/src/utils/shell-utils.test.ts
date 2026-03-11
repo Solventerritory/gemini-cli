@@ -429,7 +429,7 @@ describe('getShellConfiguration', () => {
       delete process.env['ComSpec'];
       const config = getShellConfiguration();
       expect(config.executable).toBe('powershell.exe');
-      expect(config.argsPrefix).toEqual(['-NoProfile', '-Command']);
+      expect(config.argsPrefix).toEqual(['-NoProfile', '-NonInteractive', '-Command']);
       expect(config.shell).toBe('powershell');
     });
 
@@ -438,7 +438,7 @@ describe('getShellConfiguration', () => {
       process.env['ComSpec'] = cmdPath;
       const config = getShellConfiguration();
       expect(config.executable).toBe('powershell.exe');
-      expect(config.argsPrefix).toEqual(['-NoProfile', '-Command']);
+      expect(config.argsPrefix).toEqual(['-NoProfile', '-NonInteractive', '-Command']);
       expect(config.shell).toBe('powershell');
     });
 
@@ -448,7 +448,7 @@ describe('getShellConfiguration', () => {
       process.env['ComSpec'] = psPath;
       const config = getShellConfiguration();
       expect(config.executable).toBe(psPath);
-      expect(config.argsPrefix).toEqual(['-NoProfile', '-Command']);
+      expect(config.argsPrefix).toEqual(['-NoProfile', '-NonInteractive', '-Command']);
       expect(config.shell).toBe('powershell');
     });
 
@@ -457,7 +457,7 @@ describe('getShellConfiguration', () => {
       process.env['ComSpec'] = pwshPath;
       const config = getShellConfiguration();
       expect(config.executable).toBe(pwshPath);
-      expect(config.argsPrefix).toEqual(['-NoProfile', '-Command']);
+      expect(config.argsPrefix).toEqual(['-NoProfile', '-NonInteractive', '-Command']);
       expect(config.shell).toBe('powershell');
     });
 
@@ -465,7 +465,7 @@ describe('getShellConfiguration', () => {
       process.env['ComSpec'] = 'C:\\Path\\To\\POWERSHELL.EXE';
       const config = getShellConfiguration();
       expect(config.executable).toBe('C:\\Path\\To\\POWERSHELL.EXE');
-      expect(config.argsPrefix).toEqual(['-NoProfile', '-Command']);
+      expect(config.argsPrefix).toEqual(['-NoProfile', '-NonInteractive', '-Command']);
       expect(config.shell).toBe('powershell');
     });
   });
